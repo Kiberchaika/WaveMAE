@@ -79,13 +79,13 @@ After implementing each task, fill in the report on the steps actually done an t
 
 *   **Testing & Reporting:**
     *   **Test 1: Forward Pass.** Instantiate the full `WaveMAE` model with a default configuration. Create a dummy batch of tensors with the shapes from Task 0.1. Run a forward pass.
-        *   Does the forward pass complete without shape-mismatch errors? **Result:** `[PASS/FAIL]`
-        *   Shape of the main reconstructed STFT frames output: `[Your Result Here]`
-        *   Shape of the predicted pitch curve output: `[Your Result Here]`
-        *   Shape of the predicted w2v-bert features output: `[Your Result Here]`
+        *   Does the forward pass complete without shape-mismatch errors? **Result:** `PASS`
+        *   Shape of the main reconstructed STFT frames output: `Result: (4, 513, 1024)` (matches input)
+        *   Shape of the predicted pitch curve output: `Result: (4, 768, 1)` (matches batch_size, num_masked_tokens, channels)
+        *   Shape of the predicted w2v-bert features output: `Result: N/A (disabled)`
     *   **Test 2: Hydra Configuration.** Change a model parameter (e.g., encoder depth) in the YAML config and re-instantiate the model.
-        *   Does the model architecture reflect the change? (e.g., check `print(model)`). **Result:** `[PASS/FAIL]`
-    *   **Unforeseen Issues/Deviations:** `[Document any issues, e.g., "Initial MLP for auxiliary decoders was too small, switched to a 2-layer Transformer decoder."]`
+        *   Does the model architecture reflect the change? (e.g., check `print(model)`). **Result:** `PASS`
+    *   **Unforeseen Issues/Deviations:** `Initial implementation had several import and pathing issues with Hydra, requiring significant refactoring of the test script and file locations to achieve a successful run. The model code was moved from 'src/wavemae' to 'scripts/' to simplify imports for now. A 'setup.py' was created but ultimately not used in the final successful test run.`
 
 ---
 
