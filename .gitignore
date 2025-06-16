@@ -1,2 +1,4 @@
 .venv/*
 outputs/*
+*.log
+.hydra/
