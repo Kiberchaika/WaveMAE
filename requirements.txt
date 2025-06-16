@@ -13,4 +13,5 @@ tensorboard
 soundfile
 datasets
 einops
-tqdm 
+tqdm
+auraloss 

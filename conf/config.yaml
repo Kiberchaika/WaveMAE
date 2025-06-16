@@ -1,8 +1,39 @@
-
-defaults:
-  - model: wavemae
-  - _self_
-
 hydra:
   run:
-    dir: .
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+data:
+  path: /media/k4/storage2/Datasets/Emilia/EN_EXTRACTED
+  sampling_rate: 24000
+  stft:
+    n_fft: 1024
+    hop_length: 256
+    win_length: 1024
+  aux_models:
+    target_sr: 16000
+
+model:
+  _target_: models.WaveMAE
+  in_channels: 513
+  encoder:
+    dims: [96, 192, 384, 768]
+    depths: [3, 3, 9, 3]
+  decoder:
+    depth: 1
+  mask_ratio: 0.75
+
+train:
+  seed: 42
+  max_steps: -1 # No limit by default
+  batch_size: 16
+  num_workers: 4
+  learning_rate: 1.5e-4
+  epochs: 100
+  log_audio_steps: 100
+  save_checkpoint_steps: 1000
+
+loss:
+  weights:
+    recon: 1.0
+    percep: 1.0
+    crepe: 10.0
