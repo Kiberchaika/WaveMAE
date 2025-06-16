@@ -1,0 +1,17 @@
+# @package _group_
+name: emilia
+path: /media/k4/storage2/Datasets/Emilia/EN_EXTRACTED
+sampling_rate: 24000
+
+# STFT parameters for converting audio to spectral representation
+stft:
+  n_fft: 1024
+  hop_length: 256
+  win_length: 1024
+
+# Parameters for the auxiliary models
+aux_models:
+  # This is a placeholder and is currently disabled in the code.
+  w2v_bert_model_name: "hf-internal-testing/tiny-random-wav2vec2-bert"
+  # Sampling rate required by both crepe and w2v-bert
+  target_sr: 16000 

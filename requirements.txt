@@ -1,0 +1,16 @@
+torch
+torchaudio
+torchvision
+hydra-core
+accelerate
+transformers
+librosa
+torchcrepe
+pandas
+scipy
+numpy
+tensorboard
+soundfile
+datasets
+einops
+tqdm 
