@@ -4,7 +4,10 @@ hydra:
 
 data:
   path: /media/k4/storage2/Datasets/Emilia/EN_EXTRACTED
+  precomputed_crepe_path: precomputed_data/crepe
+  cache_path: precomputed_data/emilia_file_index.json
   sampling_rate: 24000
+  segment_duration_secs: 10
   stft:
     n_fft: 1024
     hop_length: 256
@@ -12,8 +15,13 @@ data:
   aux_models:
     target_sr: 16000
 
+crepe:
+  use_precomputed_crepe: false
+  save_precomputed_crepe: false
+
 model:
   _target_: models.WaveMAE
+  crepe_model_name: "full"
   in_channels: 513
   encoder:
     dims: [96, 192, 384, 768]
@@ -24,10 +32,10 @@ model:
 
 train:
   seed: 42
-  max_steps: -1 # No limit by default
-  batch_size: 16
+  max_steps: 40
+  batch_size: 32
   num_workers: 4
-  learning_rate: 1.5e-4
+  learning_rate: 0.00015
   epochs: 100
   log_audio_steps: 100
   save_checkpoint_steps: 1000

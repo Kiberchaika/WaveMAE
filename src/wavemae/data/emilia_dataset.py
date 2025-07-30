@@ -1,118 +1,117 @@
+import logging
+import os
 import json
 from pathlib import Path
-
 import torch
-import torchcrepe
+from torch.utils.data import Dataset
 import torchaudio
 import torchaudio.transforms as T
-from torch.nn import functional as F
-from torch.utils.data import Dataset
+import random
+import numpy as np
 
+LOGGER = logging.getLogger(__name__)
 
 class EmiliaDataset(Dataset):
-    def __init__(self, cfg, split, device='cpu'):
-        self.cfg_data = cfg.data
+    def __init__(self, config, split='train'):
+        self.config = config
         self.split = split
-        self.device = device
-        self.data_path = Path(self.cfg_data.path)
+        self.source_data_root = Path(config.data.path)
+        self.precomputed_crepe_root = Path(config.data.precomputed_crepe_path)
+        self.file_index = self._build_index(config.data.cache_path, self.source_data_root)
         
-        self.items = self._scan_dataset()
+        self.sample_rate = config.data.sampling_rate
+        self.segment_length = int(config.data.segment_duration_secs * self.sample_rate)
         
-        self.resampler_stft = None
-        self.resampler_16k = None
-        self.target_sr_stft = self.cfg_data.sampling_rate
-        self.target_sr_16k = self.cfg_data.aux_models.target_sr
+        self.n_fft = config.data.stft.n_fft
+        self.hop_length = config.data.stft.hop_length
+        self.win_length = config.data.stft.win_length
 
-    def _scan_dataset(self):
-        items = []
-        # In the absence of a split key, we will use a simple heuristic for train/dev/test.
-        # This is a placeholder and should be replaced with a more robust method.
-        all_json_files = sorted(list(self.data_path.rglob("*.json")))
+    def _build_index(self, index_path, data_path):
+        cache_path = Path(index_path)
+        if cache_path.exists():
+            LOGGER.info(f"Loading cached file index from {cache_path}")
+            with open(cache_path, 'r') as f:
+                return json.load(f)[self.split]
+
+        LOGGER.info(f"Cache not found. Scanning dataset at {data_path}. This may take a while...")
+        all_audio_files = list(data_path.rglob("*.mp3"))
         
-        # Simple split: 80% train, 10% dev, 10% test
-        num_files = len(all_json_files)
+        items_full = [{"path": str(p), "id": p.stem} for p in all_audio_files]
+        
+        random.seed(42)
+        random.shuffle(items_full)
+
+        num_files = len(items_full)
         train_end = int(num_files * 0.8)
         dev_end = int(num_files * 0.9)
 
-        if self.split == 'train':
-            split_files = all_json_files[:train_end]
-        elif self.split == 'dev':
-            split_files = all_json_files[train_end:dev_end]
-        else: # test
-            split_files = all_json_files[dev_end:]
+        data_splits = {
+            "train": items_full[:train_end],
+            "dev": items_full[train_end:dev_end],
+            "test": items_full[dev_end:]
+        }
+        
+        LOGGER.info(f"Found {len(data_splits['train'])} train, {len(data_splits['dev'])} dev, and {len(data_splits['test'])} test samples.")
+        LOGGER.info(f"Saving file index to {cache_path}...")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(cache_path, 'w') as f:
+            json.dump(data_splits, f)
 
-        for json_path in split_files:
-            mp3_path = json_path.with_suffix(".mp3")
-            if mp3_path.exists():
-                items.append({
-                    "path": str(mp3_path),
-                    "id": mp3_path.stem
-                })
-        return items
+        return data_splits[self.split]
 
     def __len__(self):
-        return len(self.items)
-
-    def _get_resampler(self, resampler, orig_freq, target_freq):
-        if resampler is None or resampler.orig_freq != orig_freq:
-            return T.Resample(orig_freq=orig_freq, new_freq=target_freq).to(self.device)
-        return resampler
-
-    def _compute_stft(self, waveform, sr):
-        resampler = self._get_resampler(self.resampler_stft, sr, self.target_sr_stft)
-        waveform_resampled = resampler(waveform)
-
-        stft_params = self.cfg_data.stft
-        stft = torch.stft(
-            waveform_resampled.squeeze(0),
-            n_fft=stft_params.n_fft,
-            hop_length=stft_params.hop_length,
-            win_length=stft_params.win_length,
-            window=torch.hann_window(stft_params.win_length).to(self.device),
-            return_complex=True,
-        )
-        return torch.abs(stft)
-
-    def _compute_pitch(self, waveform, sr):
-        resampler = self._get_resampler(self.resampler_16k, sr, self.target_sr_16k)
-        waveform_16k = resampler(waveform)
-        
-        pitch, periodicity = torchcrepe.predict(
-            waveform_16k,
-            self.target_sr_16k,
-            hop_length=160, # Corresponds to 10ms hop at 16kHz
-            fmin=50.0,
-            fmax=1500.0,
-            model='full',
-            batch_size=512,
-            device=self.device,
-            return_periodicity=True,
-        )
-        return pitch.squeeze(0)
-
-    def _align_features(self, target_len, pitch):
-        # Align CREPE pitch
-        pitch = pitch.unsqueeze(0).unsqueeze(0)
-        aligned_pitch = F.interpolate(pitch, size=target_len, mode='linear', align_corners=False)
-        return aligned_pitch.squeeze()
+        return len(self.file_index)
 
     def __getitem__(self, idx):
-        item_info = self.items[idx]
+        item_info = self.file_index[idx]
+        file_path = Path(item_info["path"])
         
-        waveform, sr = torchaudio.load(item_info["path"])
-        waveform = waveform.to(self.device)
-        
-        if waveform.ndim > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
+        try:
+            # 1. Load Audio
+            audio, sr = torchaudio.load(file_path)
+            if sr != self.sample_rate:
+                resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
+                audio = resampler(audio)
+            
+            if audio.ndim > 1 and audio.shape[0] > 1:
+                audio = torch.mean(audio, dim=0, keepdim=True)
 
-        stft_mag = self._compute_stft(waveform, sr)
-        pitch = self._compute_pitch(waveform, sr)
-        
-        aligned_pitch = self._align_features(stft_mag.shape[1], pitch)
+            # --- Pad or crop to segment length ---
+            if audio.shape[-1] < self.segment_length:
+                pad_amount = self.segment_length - audio.shape[-1]
+                audio = torch.nn.functional.pad(audio, (0, pad_amount))
+            elif audio.shape[-1] > self.segment_length:
+                start = random.randint(0, audio.shape[-1] - self.segment_length)
+                audio = audio[:, start:start + self.segment_length]
 
-        return {
-            "id": item_info["id"],
-            "stft": stft_mag.cpu(),
-            "pitch": aligned_pitch.cpu(),
-            "w2v_bert": None, # Placeholder for now
-        } 
+            # 2. Load pre-computed CREPE pitch
+            relative_path = file_path.relative_to(self.source_data_root)
+            crepe_path = (self.precomputed_crepe_root / relative_path).with_suffix('.crepe.npy')
+
+            if not crepe_path.exists():
+                LOGGER.warning(f"Precomputed CREPE file not found for {file_path}, skipping. Expected at: {crepe_path}")
+                return None
+            
+            pitch = torch.from_numpy(np.load(crepe_path))
+
+            # 3. Compute STFT
+            stft_transform = T.Spectrogram(
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                win_length=self.win_length,
+                power=None,
+            )
+            stft = stft_transform(audio).squeeze(0)
+
+            # 4. Align pitch and STFT tensors
+            stft_len = stft.shape[-1]
+            # Unsqueeze to (N, C, L) for interpolate
+            pitch = pitch.unsqueeze(0).unsqueeze(0).float()
+            aligned_pitch = torch.nn.functional.interpolate(pitch, size=stft_len, mode='nearest')
+            aligned_pitch = aligned_pitch.squeeze(0).squeeze(0).long()
+
+            return {"pitch": aligned_pitch, "stft": stft, "id": item_info["id"]}
+
+        except Exception as e:
+            LOGGER.error(f"Error processing {file_path}: {e}", exc_info=True)
+            return None 

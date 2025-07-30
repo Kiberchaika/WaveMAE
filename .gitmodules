@@ -1,3 +1,6 @@
 [submodule "ConvNeXt-V2"]
 	path = ConvNeXt-V2
 	url = https://github.com/facebookresearch/ConvNeXt-V2.git
+[submodule "RMVPE"]
+	path = RMVPE
+	url = https://github.com/Dream-High/RMVPE

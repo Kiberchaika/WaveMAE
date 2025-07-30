@@ -1,16 +1,20 @@
 #!/bin/bash
 set -e
 
-echo "Creating virtual environment in ./.venv ..."
-python3 -m venv .venv
+# Define the venv directory
+VENV_DIR=".venv"
+
+echo "Creating virtual environment in ./$VENV_DIR ..."
+python3 -m venv $VENV_DIR
 
 echo "Activating virtual environment..."
-source .venv/bin/activate
+source $VENV_DIR/bin/activate
 
 echo "Installing dependencies from requirements.txt..."
 pip install -r requirements.txt
+pip install auraloss
 
 echo ""
 echo "Setup complete."
 echo "To activate the environment in your shell, run:"
-echo "source .venv/bin/activate" 
+echo "source $VENV_DIR/bin/activate" 

@@ -1,0 +1,12 @@
+{
+  "en_de_layers": 5,
+  "en_out_channels": 16,
+  "in_channels": 1,
+  "inter_layers": 4,
+  "kernel_size": [
+    2,
+    2
+  ],
+  "n_blocks": 4,
+  "n_gru": 1
+}

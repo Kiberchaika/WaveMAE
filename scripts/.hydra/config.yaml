@@ -1,0 +1,15 @@
+model:
+  _target_: models.WaveMAE
+  in_channels: 513
+  encoder_dims:
+  - 96
+  - 192
+  - 384
+  - 768
+  encoder_depths:
+  - 3
+  - 3
+  - 9
+  - 3
+  decoder_depth: 1
+  mask_ratio: 0.75

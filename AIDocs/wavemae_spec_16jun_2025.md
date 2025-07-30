@@ -44,7 +44,7 @@ The model is an autoencoder operating on STFT frames.
 *   **Auxiliary Decoders:**
     *   These are shallow MLP or Transformer-based decoders that operate on the same latent representation. Their gradients flow back to the encoder.
     *   **Wav2Vec2-BERT Decoder:** Predicts the hidden-state features from a frozen [`wav2vec2-bert-base`](https://huggingface.co/docs/transformers/en/model_doc/wav2vec2-bert) model for the *masked* input positions.
-    *   **CREPE Pitch Decoder:** Predicts the full F0 pitch curve (as derived by CREPE) for the *masked* input positions. This decoder will take the latent representation and the *unmasked* portion of the pitch curve as input to perform in-painting.
+    *   **RMVPE Pitch Decoder:** Predicts the full F0 pitch curve (as derived by RMVPE) for the *masked* input positions. This decoder will take the latent representation and the *unmasked* portion of the pitch curve as input to perform in-painting.
 
 #### **3. Data & Loss Formulation**
 
@@ -53,7 +53,7 @@ The model is an autoencoder operating on STFT frames.
     *   `L_main_recon`: Reconstruction loss (L1/MSE) on the output of the main shallow decoder against the original STFT frames.
     *   `L_main_percep`: Perceptual loss (e.g., Multi-Resolution STFT Loss) on the output of the main shallow decoder.
     *   `L_aux_w2v`: L2 loss between the Wav2Vec2-BERT decoder output and the ground-truth features.
-    *   `L_aux_crepe`: L1 loss between the CREPE decoder output and the ground-truth pitch curve.
+    *   `L_aux_rmvpe`: L1 loss between the RMVPE decoder output and the ground-truth pitch curve.
 
 #### **4. Key Research Questions & Experiments**
 
@@ -79,6 +79,10 @@ This project will systematically answer the following:
     *   **Audio Logging:** A utility function must be implemented to log a few validation samples (original, reconstructed) to TensorBoard as audio every `n=100` steps.
     *   **Checkpointing:** The training loop must support saving a full training state (model, optimizer, `accelerate` state) every `k=1000` steps and must be able to resume seamlessly.
 
+*   **Pre-trained Models:**
+    *   The `safetensors` model weights and `config.json` for the RMVPE model are located in `pretrained_models/rmvpe_safe-models/`.
+    *   The compatible Python source code for this model, sourced from the `Retrieval-based-Voice-Conversion-WebUI` project, is located in `pretrained_models/rmvpe_model_code/`.
+
 ---
 
 ### **Actionable Plan Outline**
@@ -89,7 +93,7 @@ This plan is structured in phases to de-risk the project and ensure foundational
 
 *   **Goal:** Build a complete, testable pipeline. No long training runs.
 *   **Tasks:**
-    1.  **Data Pipeline:** Implement the Emilia `Dataset` and `DataLoader`. The pipeline must handle loading audio, resampling, STFT, and pre-computing targets for auxiliary losses (pitch via CREPE, features via Wav2Vec2-BERT).
+    1.  **Data Pipeline:** Implement the Emilia `Dataset` and `DataLoader`. The pipeline must handle loading audio, resampling, STFT, and pre-computing targets for auxiliary losses (pitch via RMVPE, features via Wav2Vec2-BERT).
     2.  **Model Scaffolding:** Implement the full WaveMAE architecture in PyTorch, with all components (Encoder, Decoders) wired together. Make all key parameters (TSR, receptive field, loss weights) configurable via Hydra.
     3.  **Core Utilities:**
         *   **Implement and test checkpoint saving/loading** with `accelerate`. Verify that a resumed run produces bit-for-bit identical results to a continuous run.

@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Accelerate Debug",
+            "type": "python",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "args": [
+                "--multi_gpu",
+                "--num_processes=2",
+                "${workspaceFolder}/scripts/train.py",
+                "train.max_steps=40",
+                "train.batch_size=32"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "HYDRA_FULL_ERROR": "1",
+                "TORCH_LOGS": "dynamic"
+            }
+        }
+    ]
+} 

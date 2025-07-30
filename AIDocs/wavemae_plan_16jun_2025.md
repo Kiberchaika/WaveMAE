@@ -39,7 +39,7 @@ After implementing each task, fill in the report on the steps actually done an t
 *   **Objective:** Create a reproducible environment and a data loading pipeline that can preprocess and serve data from the Emilia dataset.
 
 *   **Action Items:**
-    1.  Create a `requirements.txt` file with all necessary libraries (PyTorch, Hydra, Accelerate, Hugging Face Transformers, librosa, crepe, etc.).
+    1.  Create a `requirements.txt` file with all necessary libraries (PyTorch, Hydra, Accelerate, Hugging Face Transformers, librosa, RMVPE, etc.).
     2.  Write a `setup.sh` script that creates a `venv`, activates it, and installs dependencies from `requirements.txt`.
     3.  Implement a PyTorch `Dataset` class for the Emilia dataset.
         *   It should parse the `metadata/*.csv` files.
@@ -52,12 +52,12 @@ After implementing each task, fill in the report on the steps actually done an t
         *   **Result:** `PASS`
     *   **Test 2: Data Loading.** Instantiate the `Dataset` and `DataLoader` for the `dev` split. Fetch one batch.
         *   What is the shape of the STFT frames tensor in the batch? **Result:** `(batch_size, num_freq_bins, num_frames)` = `(batch_size, 513, Dynamic)`
-        *   What is the shape of the CREPE pitch tensor? **Result:** `(batch_size, num_frames)` = `(batch_size, Dynamic)`
+        *   What is the shape of the RMVPE pitch tensor? **Result:** `(batch_size, num_frames)` = `(batch_size, Dynamic)`
         *   What is the shape of the Wav2Vec2-BERT tensor? **Result:** `N/A (Temporarily Disabled)`
     *   **Unforeseen Issues/Deviations:** 
-        *   **Switched to On-the-Fly Processing:** The initial plan to pre-compute all auxiliary data was changed. All features (STFT, CREPE pitch) are now generated on-the-fly within the `Dataset` class to better handle large datasets and improve flexibility. The pre-computation script has been removed.
+        *   **Switched to On-the-Fly Processing:** The initial plan to pre-compute all auxiliary data was changed. All features (STFT, RMVPE pitch) are now generated on-the-fly within the `Dataset` class to better handle large datasets and improve flexibility. The pre-computation script has been removed.
         *   **Local Dataset:** The Hugging Face `speech-io/emilia` dataset was unavailable. The pipeline was reconfigured to use a local version of the dataset located at `/media/k4/storage2/Datasets/Emilia/EN_EXTRACTED`.
-        *   **Implemented TorchCrepe:** The original `crepe` library, which requires a `tensorflow` installation, was replaced with `torchcrepe` to maintain a pure PyTorch environment.
+        *   **Implemented TorchRMVPE:** The original `RMVPE` library, which requires a `tensorflow` installation, was replaced with `torchRMVPE` to maintain a pure PyTorch environment.
         *   **Dataset Splitting:** The dataset's metadata files did not contain information for splitting into train, dev, and test sets. A temporary 80/10/10% file-based split has been implemented directly in the `Dataset` class.
         *   **Wav2Vec2-BERT Disabled:** The Wav2Vec2-BERT feature extraction is temporarily disabled to focus on the core pipeline. This auxiliary task can be re-enabled later.
 
@@ -72,7 +72,7 @@ After implementing each task, fill in the report on the steps actually done an t
     1.  Implement the **ConvNeXt V2 Encoder** as a PyTorch `nn.Module`. It should be adapted to handle 1D sequences of STFT frames (i.e., treating frequency bins as channels). Key parameters (depth, kernel size, channel dimensions) must be exposed for Hydra config.
     2.  Implement the **Shallow Decoder** (`nn.Module`) consisting of a single ConvNeXt V2 block.
     3.  Implement the two **Auxiliary Decoders** (`nn.Module`). These can be simple MLPs or lightweight Transformer decoders.
-        *   **CREPE Decoder:** Takes latent representation + unmasked pitch curve to predict the masked portion.
+        *   **RMVPE Decoder:** Takes latent representation + unmasked pitch curve to predict the masked portion.
         *   **Wav2Vec2-BERT Decoder:** Takes latent representation to predict masked `w2v-bert` features.
     4.  Create the main `WaveMAE` model that ties all components together. It should handle the masking logic (masking a percentage of time-axis frames) and forward passes through all decoders.
     5.  Set up the Hydra configuration structure (`conf/*.yaml`) for all model parameters, loss weights, and training settings.
@@ -101,7 +101,7 @@ After implementing each task, fill in the report on the steps actually done an t
         *   The function should save the model, optimizer, and training state to a specified directory.
         *   The training script must accept a `--resume_from_checkpoint` argument.
     4.  **Implement TensorBoard Logging:**
-        *   Log all loss components (total, main recon, main percep, aux w2v, aux crepe) every step.
+        *   Log all loss components (total, main recon, main percep, aux w2v, aux RMVPE) every step.
         *   Implement a separate logging function `log_audio_to_tensorboard`. This function should take a few examples from a validation batch, perform an inverse STFT on the original and reconstructed frames, and log the resulting audio.
 
 *   **Testing & Reporting:**

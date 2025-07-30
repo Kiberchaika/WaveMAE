@@ -3,6 +3,29 @@ import logging
 import os
 import sys
 from pathlib import Path
+import warnings
+
+# Set multiprocessing start method
+import torch.multiprocessing as mp
+# Set this before any CUDA initialization
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass
+
+# Set thread limits BEFORE importing torch or numpy
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+# Suppress unwanted warnings
+warnings.filterwarnings("ignore", "pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", "Importing from timm.models.layers is deprecated")
+try:
+    from cryptography.utils import CryptographyDeprecationWarning
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
+except ImportError:
+    pass
 
 import hydra
 import torch
@@ -15,6 +38,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import auraloss
+import torchcrepe
 
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -28,42 +52,18 @@ torchaudio.utils.sox_utils.set_verbosity(0)
 LOGGER = logging.getLogger(__name__)
 
 
-def collate_fn(batch):
-    """
-    Pads STFT and pitch tensors to the maximum length in a batch.
-    """
-    max_len = max(item['stft'].shape[1] for item in batch)
-    
-    stfts, pitches, ids = [], [], []
-
-    for item in batch:
-        stft = item['stft']
-        pitch = item['pitch']
-        
-        len_diff = max_len - stft.shape[1]
-        
-        stfts.append(torch.nn.functional.pad(stft, (0, len_diff)))
-        pitches.append(torch.nn.functional.pad(pitch, (0, len_diff)))
-        ids.append(item['id'])
-
-    return {
-        'stft': torch.stack(stfts),
-        'pitch': torch.stack(pitches),
-        'id': ids
-    }
-
-
-def log_audio_to_tensorboard(writer, model, val_batch, global_step, cfg):
+def log_audio_to_tensorboard(writer, model, val_batch, global_step, cfg, device):
     LOGGER.info(f"Step {global_step}: Logging audio samples to TensorBoard...")
     model.eval()
 
-    stfts = val_batch['stft']
+    stfts_complex = val_batch['stft'].to(device)
+    stfts_mag = stfts_complex.abs()
     
     with torch.no_grad():
-        reconstructed_stft, _, _, _ = model(stfts, None)
+        reconstructed_stft, _, _, _ = model(stfts_mag, None)
     
     # Use only a few examples to avoid clutter
-    num_to_log = min(stfts.size(0), 4)
+    num_to_log = min(stfts_complex.size(0), 4)
 
     # Inverse STFT
     istft_transform = torchaudio.transforms.InverseSpectrogram(
@@ -71,11 +71,15 @@ def log_audio_to_tensorboard(writer, model, val_batch, global_step, cfg):
         hop_length=cfg.data.stft.hop_length,
         win_length=cfg.data.stft.win_length,
         window_fn=torch.hann_window
-    ).to(stfts.device)
+    ).to(device)
 
     for i in range(num_to_log):
-        original_audio = istft_transform(stfts[i].unsqueeze(0).cpu()).squeeze()
-        reconstructed_audio = istft_transform(reconstructed_stft[i].unsqueeze(0).cpu()).squeeze()
+        original_audio = istft_transform(stfts_complex[i].unsqueeze(0)).squeeze()
+
+        # Recombine magnitude and phase for reconstruction
+        phase = torch.angle(stfts_complex[i].unsqueeze(0))
+        reconstructed_complex = torch.polar(reconstructed_stft[i].unsqueeze(0), phase)
+        reconstructed_audio = istft_transform(reconstructed_complex).squeeze()
         
         # Normalize for visualization
         original_audio /= original_audio.abs().max()
@@ -115,11 +119,15 @@ def main(cfg: DictConfig):
     writer = SummaryWriter(log_dir=str(output_dir / "tensorboard"))
 
     # --- Data ---
-    train_dataset = EmiliaDataset(cfg=cfg, split="train", device=device)
-    val_dataset = EmiliaDataset(cfg=cfg, split="dev", device=device)
+    LOGGER.info("Creating datasets...")
+    train_dataset = EmiliaDataset(config=cfg, split="train")
+    val_dataset = EmiliaDataset(config=cfg, split="dev")
     
-    train_loader = DataLoader(train_dataset, batch_size=cfg.train.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=cfg.train.num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=cfg.train.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=cfg.train.num_workers)
+    LOGGER.info(f"Train dataset size: {len(train_dataset)}")
+    LOGGER.info(f"Validation dataset size: {len(val_dataset)}")
+    
+    train_loader = DataLoader(train_dataset, batch_size=cfg.train.batch_size, shuffle=True, num_workers=cfg.train.num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
 
     # --- Model & Optimizer ---
     model = WaveMAE(
@@ -163,34 +171,46 @@ def main(cfg: DictConfig):
 
     # --- Training Loop ---
     LOGGER.info("Starting training loop...")
-    val_batch_for_logging = next(iter(val_loader))
+    val_batch_for_logging = None
 
     for epoch in range(start_epoch, cfg.train.epochs):
         model.train()
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}", disable=not accelerator.is_main_process)
         
+        istft_transform = torchaudio.transforms.InverseSpectrogram(
+            n_fft=cfg.data.stft.n_fft, hop_length=cfg.data.stft.hop_length, win_length=cfg.data.stft.win_length, window_fn=torch.hann_window
+        ).to(device)
+        
         for batch in progress_bar:
+            if not batch:
+                LOGGER.warning("Skipping empty batch, likely due to loading errors.")
+                continue
+
             if cfg.train.max_steps > 0 and global_step >= cfg.train.max_steps:
                 LOGGER.info(f"Reached max_steps ({cfg.train.max_steps}). Stopping training.")
                 break
 
             optimizer.zero_grad()
 
-            stfts = batch['stft']
-            pitches = batch['pitch']
+            stfts_complex = batch['stft'].to(device)
+            pitches = batch['pitch'].to(device)
+            stfts_mag = stfts_complex.abs()
             
-            reconstructed_stft, predicted_pitch, _, inverse_mask = model(stfts, None)
+            reconstructed_stft, predicted_pitch, _, inverse_mask = model(stfts_mag, None)
             
             # --- Loss Calculation ---
-            loss_recon = l1_loss(reconstructed_stft, stfts)
+            loss_recon = l1_loss(reconstructed_stft, stfts_mag)
             
             # Perceptual loss needs audio, so we need to do iSTFT
-            istft_transform = torchaudio.transforms.InverseSpectrogram(
-                n_fft=cfg.data.stft.n_fft, hop_length=cfg.data.stft.hop_length, win_length=cfg.data.stft.win_length, window_fn=torch.hann_window
-            ).to(device)
-            original_audio = istft_transform(stfts.cpu()).to(device)
-            reconstructed_audio = istft_transform(reconstructed_stft.cpu()).to(device)
-            loss_percep = perceptual_loss(reconstructed_audio, original_audio)
+            original_audio = istft_transform(stfts_complex)
+
+            # Recombine magnitude and phase for reconstruction
+            phase = torch.angle(stfts_complex)
+            reconstructed_complex = torch.polar(reconstructed_stft, phase)
+            reconstructed_audio = istft_transform(reconstructed_complex)
+
+            # Add a channel dimension for the loss function
+            loss_percep = perceptual_loss(reconstructed_audio.unsqueeze(1), original_audio.unsqueeze(1))
             
             # Gather ground truth pitch at masked locations
             masked_pitch = torch.stack([
@@ -214,13 +234,15 @@ def main(cfg: DictConfig):
                 progress_bar.set_postfix({"loss": total_loss.item()})
 
                 # Log audio and save checkpoint
-                if global_step > 0 and global_step % cfg.train.log_audio_steps == 0:
-                    log_audio_to_tensorboard(writer, accelerator.unwrap_model(), val_batch_for_logging, global_step, cfg)
+                if val_batch_for_logging is None and len(val_loader) > 0:
+                    val_batch_for_logging = next(iter(val_loader))
+                if val_batch_for_logging:
+                    log_audio_to_tensorboard(writer, model, val_batch_for_logging, global_step, cfg, device)
 
-                if global_step > 0 and global_step % cfg.train.save_checkpoint_steps == 0:
-                    checkpoint_path = output_dir / f"checkpoint_{global_step}"
-                    LOGGER.info(f"Saving checkpoint to {checkpoint_path}")
-                    accelerator.save_state(str(checkpoint_path))
+                if global_step > 0 and global_step % cfg.train.save_steps == 0:
+                    save_path = output_dir / f"checkpoint_{global_step}"
+                    LOGGER.info(f"Saving checkpoint to {save_path}")
+                    accelerator.save_state(str(save_path))
 
             global_step += 1
         

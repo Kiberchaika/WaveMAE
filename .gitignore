@@ -1,4 +1,13 @@
 .venv/*
 outputs/*
 *.log
-.hydra/
+.hydra/VocalSet/*
+datasets/*
+.gitignore
+tensorboard/*
+*.safetensors
+pretrained_models/*/model.safetensors
+checkpoint_*/
+*.bin
+*.whl
+__pycache__/

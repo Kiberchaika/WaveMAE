@@ -1,0 +1,10 @@
+README.md
+setup.py
+src/wavemae/__init__.py
+src/wavemae/models.py
+src/wavemae.egg-info/PKG-INFO
+src/wavemae.egg-info/SOURCES.txt
+src/wavemae.egg-info/dependency_links.txt
+src/wavemae.egg-info/top_level.txt
+src/wavemae/data/__init__.py
+src/wavemae/data/emilia_dataset.py
